@@ -166,10 +166,36 @@ class MatrixGame3Generate:
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
-        subprocess.run(command, cwd=repo_dir, env=env, check=True)
-        if not output_path.exists() or output_path.stat().st_size == 0:
+        proc = subprocess.run(
+            command,
+            cwd=repo_dir,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stdout or "")[-4000:]
+            try:
+                listing = "\n".join(
+                    sorted(
+                        str(p.relative_to(model_dir))
+                        + (f" ({p.stat().st_size} bytes)" if p.is_file() else "/")
+                        for p in model_dir.rglob("*")
+                    )
+                )[:4000]
+            except Exception as exc:  # noqa: BLE001
+                listing = f"<could not list {model_dir}: {exc}>"
             raise RuntimeError(
-                f"Matrix-Game completed without a usable MP4 at {output_path}."
+                f"Matrix-Game generate.py failed (exit {proc.returncode}).\n"
+                f"--- generate.py output (tail) ---\n{tail}\n"
+                f"--- model dir {model_dir} ---\n{listing}"
+            )
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            tail = (proc.stdout or "")[-2000:]
+            raise RuntimeError(
+                f"Matrix-Game exited 0 but produced no usable MP4 at "
+                f"{output_path}.\n--- output (tail) ---\n{tail}"
             )
 
         preview = {
