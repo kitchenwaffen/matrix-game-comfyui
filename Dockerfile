@@ -6,6 +6,19 @@ RUN git clone https://github.com/SkyworkAI/Matrix-Game.git /opt/Matrix-Game \
     && git -C /opt/Matrix-Game checkout "${MATRIX_GAME_COMMIT}" \
     && test "$(git -C /opt/Matrix-Game rev-parse HEAD)" = "${MATRIX_GAME_COMMIT}"
 
+# Route the transformer's attention through the SDPA-capable attention() wrapper
+# so the model runs WITHOUT flash-attention (no prebuilt wheel exists for this
+# torch 2.10 / cu13 stack and it would not build in CI). Upstream model.py calls
+# flash_attention() directly, which hard-asserts FA2/FA3 are installed;
+# attention() has the author's own scaled_dot_product_attention fallback used
+# when flash-attn is absent. The build fails if the patch does not apply cleanly.
+RUN F=/opt/Matrix-Game/Matrix-Game-3/wan/modules/model.py \
+    && sed -i 's/^from \.attention import flash_attention$/from .attention import flash_attention, attention/' "$F" \
+    && sed -i 's/x = flash_attention(/x = attention(/g' "$F" \
+    && grep -q 'from .attention import flash_attention, attention' "$F" \
+    && test "$(grep -c 'x = attention(' "$F")" -ge 2 \
+    && python3.12 -c "import ast; ast.parse(open('$F').read())"
+
 RUN python3.12 -m venv --system-site-packages /opt/matrix-game-venv \
     && /opt/matrix-game-venv/bin/python -m ensurepip \
     && /opt/matrix-game-venv/bin/python -m pip install --no-cache-dir \
